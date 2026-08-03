@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="fade-in">
+    <h2 class="section-title">Upload Customer Dataset</h2>
+    <p class="section-desc">Upload your historical customer CSV file to profile data, analyze churn distributions, and train your predictive models.</p>
+    
+    <div class="upload-container">
+        <!-- Drag & Drop Uploader -->
+        <div class="upload-dropzone" id="dropzone">
+            <input type="file" id="file-input" accept=".csv" class="file-input-hidden">
+            <div class="dropzone-content">
+                <i class="fa-solid fa-cloud-arrow-up dropzone-icon"></i>
+                <h3>Drag & Drop CSV File Here</h3>
+                <p>or click to browse local files (maximum 16MB)</p>
+                <div class="file-info-badge" id="selected-file-badge" style="display: none;">
+                    <i class="fa-regular fa-file-excel"></i>
+                    <span id="selected-file-name">filename.csv</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Upload Progress Indicator -->
+        <div class="upload-progress-card" id="upload-progress" style="display: none;">
+            <div class="progress-bar-container">
+                <div class="progress-fill" id="upload-progress-fill" style="width: 0%;"></div>
+            </div>
+            <div class="progress-text-row">
+                <span id="upload-status-text">Uploading dataset...</span>
+                <span id="upload-percent">0%</span>
+            </div>
+        </div>
+        
+        <!-- Dataset Preview Details -->
+        <div class="preview-card" id="dataset-preview-container" style="display: none;">
+            <div class="card-header">
+                <div class="header-left">
+                    <i class="fa-solid fa-table-list"></i>
+                    <h3>Dataset Preview (First 10 Rows)</h3>
+                </div>
+                <div class="header-right">
+                    <span class="badge badge-info" id="rows-badge">0 Rows</span>
+                    <span class="badge badge-purple" id="cols-badge">0 Columns</span>
+                    <span class="badge badge-success" id="target-badge">Target: Churn</span>
+                </div>
+            </div>
+            
+            <div class="glass-table-wrapper select-scroll">
+                <table class="responsive-table" id="preview-table">
+                    <thead id="preview-thead">
+                        <!-- Columns will be injected dynamically -->
+                    </thead>
+                    <tbody id="preview-tbody">
+                        <!-- Rows will be injected dynamically -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="preview-actions">
+                <a href="{{ url_for('dashboard_page') }}" class="btn btn-primary" id="btn-proceed-analysis">
+                    <span>Proceed to Analytics & Training</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Target Column Selector Modal -->
+    <div class="modal-overlay" id="target-modal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Target Column Required</h3>
+                <button class="modal-close" id="close-target-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">
+                    We could not find a column named <b>"Churn"</b> in your dataset. Please select the target column representing the customer churn state (e.g. Churn, Status, Active).
+                </p>
+                <div class="form-group">
+                    <label for="target-column-select">Select Target Column</label>
+                    <select class="form-control" id="target-column-select">
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-cancel-target">Cancel</button>
+                <button class="btn btn-primary" id="btn-confirm-target">Confirm Target</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
