@@ -212,147 +212,156 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==========================================================================
-    // PAGE 1: Upload Dataset
     // ==========================================================================
-    const dropzone = document.getElementById("dropzone");
-    const fileInput = document.getElementById("file-input");
-    const selectedFileBadge = document.getElementById("selected-file-badge");
-    const selectedFileName = document.getElementById("selected-file-name");
-    const uploadProgress = document.getElementById("upload-progress");
-    const uploadProgressFill = document.getElementById("upload-progress-fill");
-    const uploadPercent = document.getElementById("upload-percent");
-    const uploadStatusText = document.getElementById("upload-status-text");
-    
+    // PAGE 1: Data Sources & Dataset Ingestion
+    // ==========================================================================
+    const sourceCards = document.querySelectorAll(".source-card");
+    const sourcePanels = document.querySelectorAll(".source-panel");
+
+    // Source Card Tab Switcher
+    sourceCards.forEach(card => {
+        card.addEventListener("click", () => {
+            const src = card.getAttribute("data-source");
+            sourceCards.forEach(c => c.classList.remove("active"));
+            card.classList.add("active");
+
+            sourcePanels.forEach(panel => {
+                panel.style.display = "none";
+                panel.classList.remove("active");
+            });
+
+            const targetPanel = document.getElementById(`panel-${src}`);
+            if (targetPanel) {
+                targetPanel.style.display = "block";
+                targetPanel.classList.add("active");
+            }
+        });
+    });
+
+    // Unified Preview Elements
     const previewContainer = document.getElementById("dataset-preview-container");
-    const rowsBadge = document.getElementById("rows-badge");
-    const colsBadge = document.getElementById("cols-badge");
+    const previewMetaSource = document.getElementById("preview-meta-source");
+    const previewMetaDataset = document.getElementById("preview-meta-dataset");
+    const previewStatRows = document.getElementById("preview-stat-rows");
+    const previewStatCols = document.getElementById("preview-stat-cols");
+    const previewStatMissing = document.getElementById("preview-stat-missing");
     const targetBadge = document.getElementById("target-badge");
+    const btnChangeTarget = document.getElementById("btn-change-target");
+    const schemaColCount = document.getElementById("schema-col-count");
+    const schemaTagsList = document.getElementById("schema-tags-list");
     const previewThead = document.getElementById("preview-thead");
     const previewTbody = document.getElementById("preview-tbody");
-    
-    // Modal Select Target
+
+    // Target Column Selection Modal
     const targetModal = document.getElementById("target-modal");
     const targetSelect = document.getElementById("target-column-select");
     const confirmTargetBtn = document.getElementById("btn-confirm-target");
     const cancelTargetBtn = document.getElementById("btn-cancel-target");
     const closeTargetModal = document.getElementById("close-target-modal");
 
-    if (dropzone && fileInput) {
-        dropzone.addEventListener("click", () => fileInput.click());
-        
-        dropzone.addEventListener("dragover", (e) => {
-            e.preventDefault();
-            dropzone.classList.add("drag-over");
-        });
-        
-        dropzone.addEventListener("dragleave", () => {
-            dropzone.classList.remove("drag-over");
-        });
-        
-        dropzone.addEventListener("drop", (e) => {
-            e.preventDefault();
-            dropzone.classList.remove("drag-over");
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleDatasetUpload(files[0]);
-            }
-        });
-        
-        fileInput.addEventListener("change", (e) => {
-            if (e.target.files.length > 0) {
-                handleDatasetUpload(e.target.files[0]);
-            }
-        });
-    }
+    // Progress Bar Elements
+    const uploadProgress = document.getElementById("upload-progress");
+    const uploadProgressFill = document.getElementById("upload-progress-fill");
+    const uploadPercent = document.getElementById("upload-percent");
+    const uploadStatusText = document.getElementById("upload-status-text");
 
-    function handleDatasetUpload(file) {
-        if (!file.name.endsWith(".csv")) {
-            showNotification("Please upload a CSV file format only.", "error");
-            return;
-        }
-
-        // Show Progress Bar
-        selectedFileName.textContent = file.name;
-        selectedFileBadge.style.display = "inline-flex";
+    function showUploadProgress(statusMsg = "Ingesting dataset...") {
+        if (!uploadProgress) return;
         uploadProgress.style.display = "block";
-        uploadProgressFill.style.width = "0%";
-        uploadPercent.textContent = "0%";
-        uploadStatusText.textContent = "Uploading CSV dataset...";
-        previewContainer.style.display = "none";
-
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/upload", true);
-
-        xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-                const percent = Math.round((e.loaded / e.total) * 100);
-                uploadProgressFill.style.width = `${percent}%`;
-                uploadPercent.textContent = `${percent}%`;
-                if (percent === 100) {
-                    uploadStatusText.textContent = "Analyzing structure & generating preview...";
-                }
-            }
-        };
-
-        xhr.onload = function() {
-            if (xhr.status === 200) {
-                const response = JSON.parse(xhr.responseText);
-                if (response.success) {
-                    showNotification("Dataset uploaded and structured successfully!", "success");
-                    displayDatasetPreview(response.data);
-                } else {
-                    showNotification(response.error || "Failed to upload file.", "error");
-                    uploadProgress.style.display = "none";
-                }
-            } else {
-                showNotification("Server error uploading file.", "error");
-                uploadProgress.style.display = "none";
-            }
-        };
-
-        xhr.send(formData);
+        if (uploadProgressFill) uploadProgressFill.style.width = "0%";
+        if (uploadPercent) uploadPercent.textContent = "0%";
+        if (uploadStatusText) uploadStatusText.textContent = statusMsg;
+        if (previewContainer) previewContainer.style.display = "none";
     }
 
+    function setUploadProgress(percent, msg) {
+        if (uploadProgressFill) uploadProgressFill.style.width = `${percent}%`;
+        if (uploadPercent) uploadPercent.textContent = `${percent}%`;
+        if (msg && uploadStatusText) uploadStatusText.textContent = msg;
+    }
+
+    function hideUploadProgress() {
+        if (uploadProgress) uploadProgress.style.display = "none";
+    }
+
+    // Unified Preview Renderer (Requirement 6)
     function displayDatasetPreview(data) {
-        uploadProgress.style.display = "none";
-        rowsBadge.textContent = `${data.shape[0]} Rows`;
-        colsBadge.textContent = `${data.shape[1]} Columns`;
-        
-        if (data.target_detected) {
-            targetBadge.textContent = `Target: ${data.detected_target}`;
-            targetBadge.className = "badge badge-success";
-        } else {
-            targetBadge.textContent = "Target: Missing";
-            targetBadge.className = "badge badge-danger";
-            // Open selection modal
-            openTargetSelectionModal(data.all_columns);
+        hideUploadProgress();
+        if (!previewContainer) return;
+
+        if (previewMetaSource) previewMetaSource.textContent = data.source || "Uploaded Dataset";
+        if (previewMetaDataset) previewMetaDataset.textContent = data.dataset_name || "customer_churn.csv";
+        if (previewStatRows) previewStatRows.textContent = data.rows_formatted || (data.shape ? data.shape[0].toLocaleString() : "0");
+        if (previewStatCols) previewStatCols.textContent = data.shape ? data.shape[1] : (data.columns ? data.columns.length : "0");
+        if (previewStatMissing) previewStatMissing.textContent = data.total_missing !== undefined ? data.total_missing.toLocaleString() : "0";
+
+        // Target Badge Status
+        if (targetBadge) {
+            if (data.target_detected && data.detected_target) {
+                targetBadge.textContent = `Target: ${data.detected_target}`;
+                targetBadge.className = "badge badge-success";
+            } else {
+                targetBadge.textContent = "Target: Not Detected";
+                targetBadge.className = "badge badge-danger";
+                openTargetSelectionModal(data.all_columns || data.columns || []);
+            }
         }
 
-        // Render Headers
-        previewThead.innerHTML = `<tr>${data.columns.map(col => `<th>${col}</th>`).join("")}</tr>`;
-        
-        // Render Rows
-        previewTbody.innerHTML = data.rows.map(row => {
-            return `<tr>${row.map(cell => `<td>${cell}</td>`).join("")}</tr>`;
-        }).join("");
+        // Schema Drawer (Column Names & Data Types & Missing Values)
+        if (schemaColCount) schemaColCount.textContent = data.columns ? data.columns.length : 0;
+        if (schemaTagsList && data.columns) {
+            schemaTagsList.innerHTML = data.columns.map(col => {
+                const dtype = (data.dtypes && data.dtypes[col]) ? data.dtypes[col] : "object";
+                const missing = (data.missing_counts && data.missing_counts[col]) ? data.missing_counts[col] : 0;
+                const missingBadge = missing > 0 ? `<span class="schema-tag-missing">${missing} null</span>` : "";
+                return `
+                    <div class="schema-tag">
+                        <span>${col}</span>
+                        <span class="schema-tag-dtype">${dtype}</span>
+                        ${missingBadge}
+                    </div>
+                `;
+            }).join("");
+        }
+
+        // Render Table Headers
+        if (previewThead && data.columns) {
+            previewThead.innerHTML = `<tr>${data.columns.map(col => `<th>${col}</th>`).join("")}</tr>`;
+        }
+
+        // Render Table Rows (First 50 Rows)
+        if (previewTbody && data.rows) {
+            previewTbody.innerHTML = data.rows.map(row => {
+                return `<tr>${row.map(cell => `<td>${cell !== null && cell !== undefined ? cell : ""}</td>`).join("")}</tr>`;
+            }).join("");
+        }
 
         previewContainer.style.display = "block";
+        previewContainer.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
+    // Modal Target Column Functions
     function openTargetSelectionModal(columns) {
         if (!targetModal || !targetSelect) return;
         targetSelect.innerHTML = columns.map(col => `<option value="${col}">${col}</option>`).join("");
         targetModal.style.display = "flex";
     }
 
+    if (btnChangeTarget) {
+        btnChangeTarget.addEventListener("click", () => {
+            const cols = [];
+            if (previewThead) {
+                previewThead.querySelectorAll("th").forEach(th => cols.push(th.textContent.trim()));
+            }
+            if (cols.length > 0) openTargetSelectionModal(cols);
+        });
+    }
+
     if (confirmTargetBtn) {
         confirmTargetBtn.addEventListener("click", () => {
             const selectedCol = targetSelect.value;
-            showLoader("Setting Target Column", `Mapping target label to: ${selectedCol}`);
-            
+            showLoader("Setting Target Column", `Mapping churn target to: ${selectedCol}`);
+
             fetch("/select-target", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -378,6 +387,486 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (cancelTargetBtn) cancelTargetBtn.addEventListener("click", () => targetModal.style.display = "none");
     if (closeTargetModal) closeTargetModal.addEventListener("click", () => targetModal.style.display = "none");
+
+    // ==========================================================================
+    // 1. CSV SOURCE CONTROLLER
+    // ==========================================================================
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("file-input");
+    const selectedFileBadge = document.getElementById("selected-file-badge");
+    const selectedFileName = document.getElementById("selected-file-name");
+
+    if (dropzone && fileInput) {
+        dropzone.addEventListener("click", () => fileInput.click());
+        dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("drag-over"); });
+        dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
+        dropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            dropzone.classList.remove("drag-over");
+            if (e.dataTransfer.files.length > 0) handleCsvUpload(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleCsvUpload(e.target.files[0]);
+        });
+    }
+
+    function handleCsvUpload(file) {
+        if (!file.name.toLowerCase().endsWith(".csv")) {
+            showNotification("❌ Invalid file format. Please upload a CSV file.", "error");
+            return;
+        }
+
+        if (selectedFileName) selectedFileName.textContent = file.name;
+        if (selectedFileBadge) selectedFileBadge.style.display = "inline-flex";
+        showUploadProgress("Uploading CSV file...");
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/upload", true);
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                setUploadProgress(percent, percent === 100 ? "Processing CSV & generating preview..." : "Uploading CSV...");
+            }
+        };
+
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        showNotification("CSV dataset loaded successfully!", "success");
+                        displayDatasetPreview(response.data);
+                    } else {
+                        showNotification(response.error || "Could not load CSV file.", "error");
+                        hideUploadProgress();
+                    }
+                } catch(e) {
+                    showNotification("❌ Could not parse server response.", "error");
+                    hideUploadProgress();
+                }
+            } else {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    showNotification(response.error || "Server error loading CSV.", "error");
+                } catch(e) {
+                    showNotification("❌ Could not load the dataset. Please check the file format or URL.", "error");
+                }
+                hideUploadProgress();
+            }
+        };
+
+        xhr.onerror = function() {
+            showNotification("❌ Network error while uploading CSV.", "error");
+            hideUploadProgress();
+        };
+
+        xhr.send(formData);
+    }
+
+    // ==========================================================================
+    // 2. EXCEL SOURCE CONTROLLER (Worksheet Selection Support)
+    // ==========================================================================
+    const excelDropzone = document.getElementById("excel-dropzone");
+    const excelFileInput = document.getElementById("excel-file-input");
+    const excelSelectedBadge = document.getElementById("excel-selected-badge");
+    const excelSelectedName = document.getElementById("excel-selected-name");
+    const excelSheetContainer = document.getElementById("excel-sheet-container");
+    const excelSheetSelect = document.getElementById("excel-sheet-select");
+    const btnLoadSelectedSheet = document.getElementById("btn-load-selected-sheet");
+
+    let currentExcelFileRef = null;
+    let currentExcelFilename = null;
+
+    if (excelDropzone && excelFileInput) {
+        excelDropzone.addEventListener("click", () => excelFileInput.click());
+        excelDropzone.addEventListener("dragover", (e) => { e.preventDefault(); excelDropzone.classList.add("drag-over"); });
+        excelDropzone.addEventListener("dragleave", () => excelDropzone.classList.remove("drag-over"));
+        excelDropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            excelDropzone.classList.remove("drag-over");
+            if (e.dataTransfer.files.length > 0) handleExcelUpload(e.dataTransfer.files[0]);
+        });
+        excelFileInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleExcelUpload(e.target.files[0]);
+        });
+    }
+
+    function handleExcelUpload(file) {
+        const lowerName = file.name.toLowerCase();
+        if (!lowerName.endsWith(".xlsx") && !lowerName.endsWith(".xls")) {
+            showNotification("❌ Supported: .xlsx, .xls", "error");
+            return;
+        }
+
+        if (excelSelectedName) excelSelectedName.textContent = file.name;
+        if (excelSelectedBadge) excelSelectedBadge.style.display = "inline-flex";
+        if (excelSheetContainer) excelSheetContainer.style.display = "none";
+        showUploadProgress("Uploading Excel workbook...");
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/upload-excel", true);
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                setUploadProgress(percent, percent === 100 ? "Inspecting worksheets & structure..." : "Uploading Excel...");
+            }
+        };
+
+        xhr.onload = function() {
+            hideUploadProgress();
+            try {
+                const response = JSON.parse(xhr.responseText);
+                if (response.success) {
+                    if (response.needs_sheet_selection) {
+                        currentExcelFileRef = response.temp_filename;
+                        currentExcelFilename = response.original_filename;
+                        if (excelSheetSelect) {
+                            excelSheetSelect.innerHTML = response.sheets.map(s => `<option value="${s}">${s}</option>`).join("");
+                        }
+                        if (excelSheetContainer) excelSheetContainer.style.display = "block";
+                        showNotification(`Found ${response.sheets.length} worksheets. Please select one.`, "info");
+                    } else {
+                        showNotification("Excel dataset loaded successfully!", "success");
+                        displayDatasetPreview(response.data);
+                    }
+                } else {
+                    showNotification(response.error || "❌ Could not load the Excel file.", "error");
+                }
+            } catch(e) {
+                showNotification("❌ Could not load the dataset. Please check the file format or URL.", "error");
+            }
+        };
+
+        xhr.onerror = function() {
+            showNotification("❌ Network error uploading Excel file.", "error");
+            hideUploadProgress();
+        };
+
+        xhr.send(formData);
+    }
+
+    if (btnLoadSelectedSheet) {
+        btnLoadSelectedSheet.addEventListener("click", () => {
+            const selectedSheet = excelSheetSelect.value;
+            if (!currentExcelFileRef || !selectedSheet) {
+                showNotification("❌ Please select a worksheet.", "error");
+                return;
+            }
+
+            showLoader("Loading Worksheet", `Parsing worksheet: ${selectedSheet}`);
+            fetch("/select-excel-sheet", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    temp_filename: currentExcelFileRef,
+                    original_filename: currentExcelFilename,
+                    sheet_name: selectedSheet
+                })
+            })
+            .then(res => res.json())
+            .then(res => {
+                hideLoader();
+                if (res.success) {
+                    if (excelSheetContainer) excelSheetContainer.style.display = "none";
+                    showNotification(`Worksheet '${selectedSheet}' loaded successfully!`, "success");
+                    displayDatasetPreview(res.data);
+                } else {
+                    showNotification(res.error || "Could not load selected sheet.", "error");
+                }
+            })
+            .catch(() => {
+                hideLoader();
+                showNotification("❌ Could not load the dataset. Please check the file format or URL.", "error");
+            });
+        });
+    }
+
+    // ==========================================================================
+    // 3. DATASET URL SOURCE CONTROLLER
+    // ==========================================================================
+    const urlInput = document.getElementById("url-input");
+    const btnLoadUrl = document.getElementById("btn-load-url");
+
+    if (btnLoadUrl && urlInput) {
+        btnLoadUrl.addEventListener("click", () => {
+            const urlVal = urlInput.value.trim();
+            if (!urlVal) {
+                showNotification("❌ Could not load the dataset. Please check the file format or URL.", "error");
+                return;
+            }
+
+            showLoader("Fetching Dataset URL", "Downloading remote dataset...");
+            fetch("/load-url", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: urlVal })
+            })
+            .then(res => res.json())
+            .then(res => {
+                hideLoader();
+                if (res.success) {
+                    showNotification("Remote dataset downloaded and loaded successfully!", "success");
+                    displayDatasetPreview(res.data);
+                } else {
+                    showNotification(res.error || "❌ Could not load the dataset. Please check the file format or URL.", "error");
+                }
+            })
+            .catch(() => {
+                hideLoader();
+                showNotification("❌ Could not load the dataset. Please check the file format or URL.", "error");
+            });
+        });
+    }
+
+    // ==========================================================================
+    // 4. HUGGING FACE DATASET CONTROLLER
+    // ==========================================================================
+    const hfDatasetInput = document.getElementById("hf-dataset-id");
+    const btnLoadHf = document.getElementById("btn-load-hf");
+
+    if (btnLoadHf && hfDatasetInput) {
+        btnLoadHf.addEventListener("click", () => {
+            const datasetId = hfDatasetInput.value.trim();
+            if (!datasetId) {
+                showNotification("❌ Please enter a Hugging Face Dataset ID.", "error");
+                return;
+            }
+
+            showLoader("Loading Hugging Face Dataset", `Fetching '${datasetId}' via datasets library...`);
+            fetch("/load-huggingface", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dataset_id: datasetId })
+            })
+            .then(res => res.json())
+            .then(res => {
+                hideLoader();
+                if (res.success) {
+                    showNotification(`Hugging Face dataset '${datasetId}' loaded successfully!`, "success");
+                    displayDatasetPreview(res.data);
+                } else {
+                    showNotification(res.error || "❌ Dataset could not be found on Hugging Face. Check the dataset ID and try again.", "error");
+                }
+            })
+            .catch(() => {
+                hideLoader();
+                showNotification("❌ Dataset could not be found on Hugging Face. Check the dataset ID and try again.", "error");
+            });
+        });
+    }
+
+    // ==========================================================================
+    // 5. SQL DATABASE SOURCE CONTROLLER
+    // ==========================================================================
+    const sqlDbTypeSelect = document.getElementById("sql-db-type");
+    const sqliteFieldsContainer = document.getElementById("sqlite-fields-container");
+    const remoteSqlFieldsContainer = document.getElementById("remote-sql-fields-container");
+    const sqliteDropzone = document.getElementById("sqlite-dropzone");
+    const sqliteFileInput = document.getElementById("sqlite-file-input");
+    const sqliteSelectedBadge = document.getElementById("sqlite-selected-badge");
+    const sqliteSelectedName = document.getElementById("sqlite-selected-name");
+    const btnSqliteConnect = document.getElementById("btn-sqlite-connect");
+    const btnRemoteSqlConnect = document.getElementById("btn-remote-sql-connect");
+    const sqlHost = document.getElementById("sql-host");
+    const sqlPort = document.getElementById("sql-port");
+    const sqlDatabase = document.getElementById("sql-database");
+    const sqlUsername = document.getElementById("sql-username");
+    const sqlPassword = document.getElementById("sql-password");
+    const sqlTablesWrapper = document.getElementById("sql-tables-wrapper");
+    const sqlTableCountBadge = document.getElementById("sql-table-count-badge");
+    const sqlTablesRadioGroup = document.getElementById("sql-tables-radio-group");
+    const btnLoadSqlTable = document.getElementById("btn-load-sql-table");
+
+    let activeSqliteFile = null;
+    let activeDbType = "sqlite";
+
+    // Toggle between SQLite and MySQL/PostgreSQL
+    if (sqlDbTypeSelect) {
+        sqlDbTypeSelect.addEventListener("change", () => {
+            activeDbType = sqlDbTypeSelect.value;
+            if (sqlTablesWrapper) sqlTablesWrapper.style.display = "none";
+
+            if (activeDbType === "sqlite") {
+                if (sqliteFieldsContainer) sqliteFieldsContainer.style.display = "block";
+                if (remoteSqlFieldsContainer) remoteSqlFieldsContainer.style.display = "none";
+            } else {
+                if (sqliteFieldsContainer) sqliteFieldsContainer.style.display = "none";
+                if (remoteSqlFieldsContainer) remoteSqlFieldsContainer.style.display = "block";
+                if (sqlPort) {
+                    sqlPort.value = activeDbType === "mysql" ? "3306" : "5432";
+                }
+            }
+        });
+    }
+
+    // SQLite file selection
+    if (sqliteDropzone && sqliteFileInput) {
+        sqliteDropzone.addEventListener("click", () => sqliteFileInput.click());
+        sqliteDropzone.addEventListener("dragover", (e) => { e.preventDefault(); sqliteDropzone.classList.add("drag-over"); });
+        sqliteDropzone.addEventListener("dragleave", () => sqliteDropzone.classList.remove("drag-over"));
+        sqliteDropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            sqliteDropzone.classList.remove("drag-over");
+            if (e.dataTransfer.files.length > 0) handleSqliteFileSelect(e.dataTransfer.files[0]);
+        });
+        sqliteFileInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleSqliteFileSelect(e.target.files[0]);
+        });
+    }
+
+    function handleSqliteFileSelect(file) {
+        activeSqliteFile = file;
+        if (sqliteSelectedName) sqliteSelectedName.textContent = file.name;
+        if (sqliteSelectedBadge) sqliteSelectedBadge.style.display = "inline-flex";
+    }
+
+    // SQLite Connect button
+    if (btnSqliteConnect) {
+        btnSqliteConnect.addEventListener("click", () => {
+            if (!activeSqliteFile) {
+                showNotification("❌ Please select or upload a SQLite .db or .sqlite file first.", "error");
+                return;
+            }
+
+            showLoader("Connecting to SQLite Database", "Reading schema and available tables...");
+            const formData = new FormData();
+            formData.append("db_type", "sqlite");
+            formData.append("file", activeSqliteFile);
+
+            fetch("/sql-connect", {
+                method: "POST",
+                body: formData
+            })
+            .then(res => res.json())
+            .then(res => {
+                hideLoader();
+                if (res.success) {
+                    showNotification(`Connected! Found ${res.tables.length} tables.`, "success");
+                    renderSqlTablesList(res.tables, "sqlite", res.sqlite_file);
+                } else {
+                    showNotification(res.error || "❌ Unable to connect to the database. Please verify the connection details.", "error");
+                }
+            })
+            .catch(() => {
+                hideLoader();
+                showNotification("❌ Unable to connect to the database. Please verify the connection details.", "error");
+            });
+        });
+    }
+
+    // MySQL / PostgreSQL Connect button
+    if (btnRemoteSqlConnect) {
+        btnRemoteSqlConnect.addEventListener("click", () => {
+            const dbType = sqlDbTypeSelect.value;
+            const host = sqlHost ? sqlHost.value.trim() : "localhost";
+            const port = sqlPort ? parseInt(sqlPort.value.trim()) : 3306;
+            const database = sqlDatabase ? sqlDatabase.value.trim() : "";
+            const username = sqlUsername ? sqlUsername.value.trim() : "";
+            const password = sqlPassword ? sqlPassword.value : "";
+
+            if (!database) {
+                showNotification("❌ Please provide the database name.", "error");
+                return;
+            }
+
+            showLoader(`Connecting to ${dbType.toUpperCase()}`, `Connecting to ${host}:${port}/${database}...`);
+            fetch("/sql-connect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    db_type: dbType,
+                    host: host,
+                    port: port,
+                    database: database,
+                    username: username,
+                    password: password
+                })
+            })
+            .then(res => res.json())
+            .then(res => {
+                hideLoader();
+                if (res.success) {
+                    showNotification(`Connected! Found ${res.tables.length} tables.`, "success");
+                    renderSqlTablesList(res.tables, dbType, null);
+                } else {
+                    showNotification(res.error || "❌ Unable to connect to the database. Please verify the connection details.", "error");
+                }
+            })
+            .catch(() => {
+                hideLoader();
+                showNotification("❌ Unable to connect to the database. Please verify the connection details.", "error");
+            });
+        });
+    }
+
+    let currentSqliteFilePath = null;
+
+    function renderSqlTablesList(tables, dbType, sqlitePath) {
+        if (!sqlTablesWrapper || !sqlTablesRadioGroup) return;
+        currentSqliteFilePath = sqlitePath;
+
+        if (sqlTableCountBadge) sqlTableCountBadge.textContent = `${tables.length} Tables`;
+
+        sqlTablesRadioGroup.innerHTML = tables.map((t, idx) => `
+            <label class="table-radio-item">
+                <input type="radio" name="selected_sql_table" value="${t}" ${idx === 0 ? "checked" : ""}>
+                <i class="fa-solid fa-table text-primary"></i>
+                <span class="table-radio-label">${t}</span>
+            </label>
+        `).join("");
+
+        sqlTablesWrapper.style.display = "block";
+        sqlTablesWrapper.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    // Load Selected SQL Table
+    if (btnLoadSqlTable) {
+        btnLoadSqlTable.addEventListener("click", () => {
+            const selectedRadio = document.querySelector("input[name='selected_sql_table']:checked");
+            if (!selectedRadio) {
+                showNotification("❌ Please select a table to load.", "error");
+                return;
+            }
+
+            const tableName = selectedRadio.value;
+            const dbType = sqlDbTypeSelect ? sqlDbTypeSelect.value : activeDbType;
+
+            showLoader("Loading SQL Table", `Querying table '${tableName}' into ML pipeline...`);
+            fetch("/load-sql", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    table_name: tableName,
+                    db_type: dbType,
+                    sqlite_file: currentSqliteFilePath
+                })
+            })
+            .then(res => res.json())
+            .then(res => {
+                hideLoader();
+                // Clear password field for security
+                if (sqlPassword) sqlPassword.value = "";
+
+                if (res.success) {
+                    showNotification(`Table '${tableName}' loaded into DataFrame successfully!`, "success");
+                    displayDatasetPreview(res.data);
+                } else {
+                    showNotification(res.error || "❌ Unable to load table data.", "error");
+                }
+            })
+            .catch(() => {
+                hideLoader();
+                showNotification("❌ Unable to connect to the database. Please verify the connection details.", "error");
+            });
+        });
+    }
+
 
 
     // ==========================================================================

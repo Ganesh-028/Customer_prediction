@@ -10,6 +10,10 @@ from flask import Flask, render_template, request, jsonify, send_file, session, 
 from preprocess import ChurnPreprocessor
 from model import train_and_evaluate_models, get_feature_importances
 from report_generator import generate_pdf_report
+from data_loader import (
+    load_csv, get_excel_sheets, load_excel, load_url, load_huggingface,
+    get_sql_tables, load_sql_table, DataLoaderError
+)
 
 app = Flask(__name__)
 app.secret_key = "customer_churn_prediction_secret_key"
@@ -95,96 +99,342 @@ def prediction_page():
         
     return render_template("prediction.html", model_trained=model_trained, cat_levels=cat_levels)
 
+def save_and_register_dataset(df, source_type, dataset_name):
+    """
+    Saves loaded DataFrame to standard upload storage, updates session and history,
+    and returns a unified preview payload with first 50 rows, data types, and missing values.
+    """
+    import re
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        raise DataLoaderError("❌ The loaded dataset is empty or invalid.")
+
+    # Sanitize dataset name
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', str(dataset_name))
+    if not safe_name.lower().endswith(".csv"):
+        safe_name = f"{safe_name}.csv"
+
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{timestamp}_{safe_name}"
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+
+    # Persist as standardized CSV for downstream ML compatibility
+    df.to_csv(file_path, index=False)
+
+    rows, cols = int(df.shape[0]), int(df.shape[1])
+
+    # Check target column
+    target_col = None
+    churn_cols = [c for c in df.columns if "churn" in str(c).lower()]
+    if churn_cols:
+        target_col = churn_cols[0]
+        session["target_col"] = target_col
+        target_found = True
+    else:
+        session["target_col"] = None
+        target_found = False
+
+    session["current_dataset_path"] = file_path
+    session["uploaded_filename"] = dataset_name
+    session["data_source"] = source_type
+
+    # Update history
+    upload_info = {
+        "filename": dataset_name,
+        "source": source_type,
+        "rows": rows,
+        "columns": cols,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "path": file_path
+    }
+    recent_uploads.insert(0, upload_info)
+
+    # First 50 rows preview
+    preview_df = df.head(50).fillna("")
+
+    # Data types and missing counts
+    dtypes = {str(col): str(dtype) for col, dtype in df.dtypes.items()}
+    missing_counts = {str(col): int(df[col].isnull().sum()) for col in df.columns}
+    total_missing = int(df.isnull().sum().sum())
+
+    preview_data = {
+        "source": source_type,
+        "dataset_name": dataset_name,
+        "columns": [str(c) for c in preview_df.columns],
+        "rows": preview_df.values.tolist(),
+        "shape": [rows, cols],
+        "rows_formatted": f"{rows:,}",
+        "dtypes": dtypes,
+        "missing_counts": missing_counts,
+        "total_missing": total_missing,
+        "target_detected": target_found,
+        "detected_target": target_col,
+        "all_columns": [str(c) for c in df.columns]
+    }
+    return preview_data
+
 @app.route("/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
-        return jsonify({"success": False, "error": "No file part in the request"}), 400
+        return jsonify({"success": False, "error": "❌ No file part in the request"}), 400
         
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"success": False, "error": "No file selected"}), 400
+        return jsonify({"success": False, "error": "❌ No file selected"}), 400
         
-    if not file.filename.endswith(".csv"):
-        return jsonify({"success": False, "error": "Invalid file format. Please upload a CSV file."}), 400
+    if not file.filename.lower().endswith(".csv"):
+        return jsonify({"success": False, "error": "❌ Invalid file format. Please upload a CSV file."}), 400
         
     try:
-        # Save file
-        filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
-        file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-        file.save(file_path)
-        
-        # Load dataset preview
-        df = pd.read_csv(file_path)
-        rows, cols = df.shape
-        
-        # Check target column
-        target_col = None
-        churn_cols = [c for c in df.columns if "churn" in c.lower()]
-        if churn_cols:
-            target_col = churn_cols[0]
-            session["target_col"] = target_col
-            target_found = True
-        else:
-            session["target_col"] = None
-            target_found = False
-            
-        session["current_dataset_path"] = file_path
-        session["uploaded_filename"] = file.filename
-        
-        # Update history
-        upload_info = {
-            "filename": file.filename,
-            "rows": rows,
-            "columns": cols,
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "path": file_path
-        }
-        recent_uploads.insert(0, upload_info)
-        
-        # Limit preview to 10 rows and handle NaN for JSON serialization
-        preview_df = df.head(10).fillna("")
-        preview_data = {
-            "columns": list(preview_df.columns),
-            "rows": preview_df.values.tolist(),
-            "shape": [rows, cols],
-            "target_detected": target_found,
-            "detected_target": target_col,
-            "all_columns": list(df.columns)
-        }
-        
+        df = load_csv(file)
+        preview_data = save_and_register_dataset(df, "CSV", file.filename)
         return jsonify({"success": True, "data": preview_data})
-        
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
-        return jsonify({"success": False, "error": f"Error parsing CSV: {str(e)}"}), 500
+        return jsonify({"success": False, "error": "❌ Could not load the dataset. Please check the file format or URL."}), 500
+
+@app.route("/upload-excel", methods=["POST"])
+def upload_excel():
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "❌ No file uploaded."}), 400
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"success": False, "error": "❌ No file selected."}), 400
+        
+    lower_name = file.filename.lower()
+    if not (lower_name.endswith(".xlsx") or lower_name.endswith(".xls")):
+        return jsonify({"success": False, "error": "❌ Supported formats: .xlsx, .xls"}), 400
+
+    sheet_name = request.form.get("sheet_name")
+
+    try:
+        temp_path = os.path.join(app.config["UPLOAD_FOLDER"], f"temp_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}")
+        file.save(temp_path)
+
+        sheets = get_excel_sheets(temp_path)
+        
+        # If multiple sheets and no specific sheet requested, return sheet choices
+        if len(sheets) > 1 and not sheet_name:
+            return jsonify({
+                "success": True,
+                "needs_sheet_selection": True,
+                "sheets": sheets,
+                "temp_filename": os.path.basename(temp_path),
+                "original_filename": file.filename
+            })
+
+        # Load the sheet
+        target_sheet = sheet_name if (sheet_name and sheet_name in sheets) else sheets[0]
+        df = load_excel(temp_path, sheet_name=target_sheet)
+
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+
+        display_name = f"{file.filename} [{target_sheet}]" if len(sheets) > 1 else file.filename
+        preview_data = save_and_register_dataset(df, "Excel", display_name)
+        return jsonify({"success": True, "data": preview_data})
+
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "❌ Could not load the dataset. Please check the file format or URL."}), 500
+
+@app.route("/select-excel-sheet", methods=["POST"])
+def select_excel_sheet():
+    data = request.get_json() or {}
+    temp_filename = data.get("temp_filename")
+    original_filename = data.get("original_filename", "workbook.xlsx")
+    sheet_name = data.get("sheet_name")
+
+    if not temp_filename:
+        return jsonify({"success": False, "error": "❌ Missing file reference."}), 400
+
+    temp_path = os.path.join(app.config["UPLOAD_FOLDER"], os.path.basename(temp_filename))
+    if not os.path.exists(temp_path):
+        return jsonify({"success": False, "error": "❌ Temporary Excel file expired. Please re-upload."}), 400
+
+    try:
+        df = load_excel(temp_path, sheet_name=sheet_name)
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+
+        display_name = f"{original_filename} [{sheet_name}]" if sheet_name else original_filename
+        preview_data = save_and_register_dataset(df, "Excel", display_name)
+        return jsonify({"success": True, "data": preview_data})
+
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "❌ Could not load the dataset. Please check the file format or URL."}), 500
+
+@app.route("/load-url", methods=["POST"])
+def load_dataset_url():
+    import urllib.parse
+    data = request.get_json() or {}
+    url = data.get("url", "").strip()
+
+    if not url:
+        return jsonify({"success": False, "error": "❌ Please paste a valid dataset URL."}), 400
+
+    try:
+        df = load_url(url)
+        parsed = urllib.parse.urlparse(url)
+        path_name = os.path.basename(parsed.path) or "remote_dataset"
+        preview_data = save_and_register_dataset(df, "Dataset URL", path_name)
+        return jsonify({"success": True, "data": preview_data})
+
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "❌ Could not load the dataset. Please check the file format or URL."}), 500
+
+@app.route("/load-huggingface", methods=["POST"])
+def load_hf_dataset():
+    data = request.get_json() or {}
+    dataset_id = data.get("dataset_id", "").strip()
+
+    if not dataset_id:
+        return jsonify({"success": False, "error": "❌ Please enter a Hugging Face Dataset ID."}), 400
+
+    try:
+        df = load_huggingface(dataset_id)
+        preview_data = save_and_register_dataset(df, "Hugging Face", dataset_id)
+        return jsonify({"success": True, "data": preview_data})
+
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "❌ Dataset could not be found on Hugging Face. Check the dataset ID and try again."}), 500
+
+@app.route("/sql-connect", methods=["POST"])
+def sql_connect():
+    db_type = request.form.get("db_type") or (request.get_json() or {}).get("db_type", "sqlite")
+    db_type = db_type.strip().lower()
+
+    sqlite_file_path = None
+    connection_params = {}
+
+    if db_type == "sqlite":
+        if "file" in request.files:
+            file = request.files["file"]
+            if file.filename != "":
+                filename = f"sqlite_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+                sqlite_file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                file.save(sqlite_file_path)
+        else:
+            raw_path = request.form.get("sqlite_path") or (request.get_json() or {}).get("sqlite_path")
+            if raw_path and os.path.exists(raw_path):
+                sqlite_file_path = raw_path
+
+        if not sqlite_file_path or not os.path.exists(sqlite_file_path):
+            return jsonify({"success": False, "error": "❌ Please upload or select a valid SQLite .db or .sqlite file."}), 400
+
+        session["last_sqlite_file"] = sqlite_file_path
+
+    else:
+        data = request.get_json() if request.is_json else request.form.to_dict()
+        connection_params = {
+            "host": data.get("host", "localhost"),
+            "port": int(data.get("port") or (3306 if "mysql" in db_type else 5432)),
+            "database": data.get("database", ""),
+            "username": data.get("username", ""),
+            "password": data.get("password", "")
+        }
+        session["db_connection_params"] = {
+            "db_type": db_type,
+            "host": connection_params["host"],
+            "port": connection_params["port"],
+            "database": connection_params["database"],
+            "username": connection_params["username"],
+            "password": connection_params["password"]
+        }
+
+    try:
+        tables = get_sql_tables(db_type, connection_params=connection_params, sqlite_file=sqlite_file_path)
+        return jsonify({
+            "success": True,
+            "tables": tables,
+            "db_type": db_type,
+            "sqlite_file": sqlite_file_path
+        })
+
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "❌ Unable to connect to the database. Please verify the connection details."}), 500
+
+@app.route("/load-sql", methods=["POST"])
+def load_sql():
+    data = request.get_json() or request.form.to_dict()
+    table_name = data.get("table_name")
+    db_type = data.get("db_type") or session.get("db_connection_params", {}).get("db_type", "sqlite")
+    db_type = db_type.strip().lower()
+
+    if not table_name:
+        return jsonify({"success": False, "error": "❌ Please select a table to load."}), 400
+
+    sqlite_file_path = data.get("sqlite_file") or session.get("last_sqlite_file")
+    connection_params = session.get("db_connection_params", {})
+
+    try:
+        df = load_sql_table(db_type, connection_params=connection_params, table_name=table_name, sqlite_file=sqlite_file_path)
+
+        if "db_connection_params" in session:
+            session["db_connection_params"]["password"] = ""
+
+        display_name = f"{table_name} ({db_type.upper()})"
+        preview_data = save_and_register_dataset(df, f"SQL Database ({db_type.capitalize()})", display_name)
+        return jsonify({"success": True, "data": preview_data})
+
+    except DataLoaderError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "❌ Unable to connect to the database. Please verify the connection details."}), 500
 
 @app.route("/select-target", methods=["POST"])
 def select_target():
-    data = request.get_json()
+    data = request.get_json() or {}
     target_col = data.get("target_col")
     file_path = get_session_data_path()
     
     if not file_path or not os.path.exists(file_path):
-        return jsonify({"success": False, "error": "No uploaded dataset found."}), 400
+        return jsonify({"success": False, "error": "❌ No uploaded dataset found."}), 400
         
     try:
         df = pd.read_csv(file_path)
         if target_col not in df.columns:
-            return jsonify({"success": False, "error": f"Column '{target_col}' not found in dataset."}), 400
+            return jsonify({"success": False, "error": f"❌ Column '{target_col}' not found in dataset."}), 400
             
         session["target_col"] = target_col
+        rows, cols = int(df.shape[0]), int(df.shape[1])
         
-        preview_df = df.head(10).fillna("")
+        preview_df = df.head(50).fillna("")
+        dtypes = {str(col): str(dtype) for col, dtype in df.dtypes.items()}
+        missing_counts = {str(col): int(df[col].isnull().sum()) for col in df.columns}
+        total_missing = int(df.isnull().sum().sum())
+
         preview_data = {
-            "columns": list(preview_df.columns),
+            "source": session.get("data_source", "Uploaded Dataset"),
+            "dataset_name": session.get("uploaded_filename", "Current Dataset"),
+            "columns": [str(c) for c in preview_df.columns],
             "rows": preview_df.values.tolist(),
-            "shape": list(df.shape),
+            "shape": [rows, cols],
+            "rows_formatted": f"{rows:,}",
+            "dtypes": dtypes,
+            "missing_counts": missing_counts,
+            "total_missing": total_missing,
             "target_detected": True,
             "detected_target": target_col,
-            "all_columns": list(df.columns)
+            "all_columns": [str(c) for c in df.columns]
         }
         return jsonify({"success": True, "data": preview_data})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route("/analyze", methods=["GET"])
 def analyze_data():
